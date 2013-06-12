@@ -1,0 +1,7 @@
+\subsubsection usage Usage
+\verbatim
+<node name="vision" pkg="crazyflie_ros" type="vision">
+  <param name="on" type="bool" value="True" />
+</node>
+\endverbatim
+

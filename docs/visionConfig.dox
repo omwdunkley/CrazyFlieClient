@@ -1,0 +1,6 @@
+\subsubsection parameters ROS parameters
+
+Reads and maintains the following parameters on the ROS server
+
+- \b "~on" : \b [bool] Turn Node On min: False, default: True, max: True
+
