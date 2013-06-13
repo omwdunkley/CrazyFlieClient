@@ -5,7 +5,7 @@
         <param name="coalesce_interval" value="0.01" /> 
         <param name="autorepeat_rate" value="100" />         
     </node>
-    <node pkg="crazyflie_ros" type="joy_driver.py" name="CrazyFlieDriver" output="screen" respawn="true"> </node>       
+    <node pkg="crazyflie_ros" type="joy_driver.py" name="CrazyFlieJoyDriver" output="screen" respawn="true"> </node>       
 </launch>
 
 
