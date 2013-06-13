@@ -4,7 +4,8 @@
         <param name="deadzone" value="0.001" />
         <param name="coalesce_interval" value="0.01" /> 
         <param name="autorepeat_rate" value="100" /> 
-    </node>
+    </node>    
+    <node pkg="crazyflie_ros" type="joy_driver.py" name="CrazyFlieDriver" output="screen" respawn="true"> </node>       
 </launch>
 
 

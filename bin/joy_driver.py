@@ -7,7 +7,10 @@ from sensor_msgs.msg import Joy as JoyMSG
 from crazyflie_ros.msg import CFJoy as CFJoyMSG
 from crazyflie_ros.cfg import CFJoyConfig as CFJoyCFG
 from dynamic_reconfigure.server import Server as DynamicReconfigureServer
+import tf
+import tf.msg as TFMSG
 
+from optparse import OptionParser
 import time, sys
 from math import pi as PI
 from math import sqrt, sin, cos, degrees, radians, atan2, atan
@@ -55,11 +58,10 @@ def deadband(value, threshold):
         
 
 class JoyController:
-    def __init__(self):     
-        # Use this flag when the human is flying the quad.
-        self.human_flight = True
+    def __init__(self,options=None):     
+        self.options = options
            
-        self.joy_scale = [-1,1,-1,1,1] #RPYT
+        self.joy_scale = [-1,1,-1,1,1] #RPYTY
         self.trim_roll = 0
         self.trim_pitch = 0
         self.max_angle = 30
@@ -89,7 +91,7 @@ class JoyController:
         
         # Dynserver               
         
-        self.dynserver = DynamicReconfigureServer(CFjoyCFG, self.reconfigure)
+        self.dynserver = DynamicReconfigureServer(CFJoyCFG, self.reconfigure)
         
         
     def released(self, id):
@@ -212,7 +214,7 @@ class JoyController:
         msg.hover = hover
         msg.hover_set = hover_set
         msg.hover_change = z
-        self.pub_cfjoy.publish(msg)       
+        self.pub_cfJoy.publish(msg)       
         
         
         # Cache prev joy command
@@ -231,7 +233,7 @@ class JoyController:
         self.max_thrust_yaw = percentageToThrust(self.max_thrust)
         self.min_thrust_yaw = percentageToThrust(self.min_thrust)
         self.slew_limit_yaw = percentageToThrust(self.slew_limit)
-        self.slew_rate_yaw = percentageToThrust(self.slew_rate)             
+        self.slew_rate_yaw = percentageToThrust(self.slew_rate)            
         return config 
 
         
@@ -250,6 +252,7 @@ def run(args=None):
 
     #START NODE
     try:
+        rospy.loginfo("Starting CrazyFlie joystick driver")
         rospy.spin()
     except KeyboardInterrupt:    
         rospy.loginfo('...exiting due to keyboard interrupt')
