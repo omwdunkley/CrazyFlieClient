@@ -306,7 +306,8 @@ class Driver:
                            "magCalib.scale_z": 0,
                            "magCalib.thrust_x": 0,
                            "magCalib.thrust_y": 0,
-                           "magCalib.thrust_z": 0                         
+                           "magCalib.thrust_z": 0,
+                           "sensorfusion6.magImu":0                         
                            }
         
         # Dynserver                
@@ -519,7 +520,14 @@ class Driver:
         if self.cf_params["hover.voltageAlpha"] != config["voltageAlpha"]:
              self.cf_params["hover.voltageAlpha"] = config["voltageAlpha"]
              self.send_param("hover.voltageAlpha", config["voltageAlpha"])
-             rospy.sleep(0.1)     
+             rospy.sleep(0.1)  
+             
+        if self.cf_params["sensorfusion6.magImu"] != config["magImu"]:
+             self.cf_params["sensorfusion6.magImu"] = config["magImu"]
+             self.send_param("sensorfusion6.magImu", int(config["magImu"]))
+             rospy.sleep(0.1)              
+             
+                
              
         if self.cf_params["magCalib.off_x"] != config["magOffsetX"]:
              self.cf_params["magCalib.off_x"] = config["magOffsetX"]
@@ -532,9 +540,7 @@ class Driver:
         if self.cf_params["magCalib.off_z"] != config["magOffsetZ"]:
              self.cf_params["magCalib.off_z"] = config["magOffsetZ"]
              self.send_param("magCalib.off_z", config["magOffsetZ"])
-             rospy.sleep(0.1)             
-              
-              
+             rospy.sleep(0.1)                  
         if self.cf_params["magCalib.scale_x"] != config["magScaleX"]:
              self.cf_params["magCalib.scale_x"] = config["magScaleX"]
              self.send_param("magCalib.scale_x", config["magScaleX"])
