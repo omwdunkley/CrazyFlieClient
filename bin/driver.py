@@ -11,8 +11,8 @@ from crazyflie_ros.cfg import driverConfig as driverCFG
 
 
 
-
-import time, sys
+import csv
+import time, sys, datetime
 from optparse import OptionParser
 from threading import Thread
 from math import pi as PI
@@ -29,6 +29,7 @@ from crazyflie_ros.msg import plot as plotMSG
 from crazyflie_ros.msg import attitude as attitudeMSG
 from crazyflie_ros.msg import hover as hoverMSG
 from crazyflie_ros.msg import CFJoy as joyMSG
+from crazyflie_ros.msg import mag_calib as magCalibMSG
  
 import cflib.crtp
 from cflib.crazyflie import Crazyflie
@@ -38,7 +39,34 @@ from cfclient.utils.logconfigreader import LogVariable, LogConfig
 
 
 
+MAX_THRUST = 65365.0
 
+class ChargeState:
+    def __init__(self):
+        self.mA100 = 0
+        self.mA500 = 1
+        self.mAMAX = 2
+        self.states = {0:"100mA", 1:"500mA", 2:"max"}
+        
+    def get(self,nr):
+        return self.states[nr]
+        
+    
+class BatteryStatus:
+    def __init__(self):
+        self.BATTERY = 0
+        self.CHARHING = 1
+        self.CHARGED = 2
+        self.LOW = 3
+        self.SHUTDOWN = 4    
+        self.states = {0:"BATTERY",1:"CHARGING",2:"CHARGED",3:"LOW",4:"SHUTDOWN"}       
+    def get(self,nr):
+        return self.states[nr]
+    
+    
+# TODO:shouldnt min thrust be subtracted?
+def thrustToPercentage( thrust):
+    return ((float(thrust)/MAX_THRUST)*100.0)
     
 from collections import deque
 from scipy.signal import filtfilt, butter
@@ -111,6 +139,78 @@ class LPF:
 
 
     
+    
+class BatteryMonitor:
+    def __init__(self):
+        self.state = -1
+        self.charge_state = -1
+        self.voltage = Avg3(100)
+        self.C_STATE = ChargeState()
+        self.B_STATE = BatteryStatus()
+        self.vmax = 4.2 # when charging
+        self.vmin = 3.7 # when charging
+        self.last_time = None
+        self.t = None
+        
+        self.time_volt = []
+        self.start_charge = None
+        
+        self.temp = -1
+        
+        
+    def done(self):
+        for v,t in self.time_volt:
+            print str(v)+","+str(t)                
+            self.time_volt = []
+            
+        
+    def update(self, state, charge_state, voltage):   
+        
+        self.voltage.add(voltage)        
+          
+        # Battery state changed  
+        if self.state != state:
+            self.state = state
+            rospy.loginfo("Battery State changed to " + self.B_STATE.get(state))
+            
+            # Battery become low
+            if state == self.B_STATE.LOW:
+                rospy.logwarn("Battery low!")
+              
+            # Finished charging  
+            if state == self.B_STATE.CHARGED:
+                rospy.loginfo("Charged in " + str( round((self.start_charge - rospy.Time.now()).to_sec()/60),2))
+                self.done()
+             
+            # Started charging   
+            if state == self.B_STATE.CHARHING:
+                self.start_charge = rospy.Time.now()
+                
+            # Switched to battery    
+            if state == self.B_STATE.BATTERY:
+                self.done()
+                
+        # Charging State changed            
+        if self.charge_state != charge_state:
+            self.charge_state = charge_state
+            rospy.loginfo("Chrage State changed to " + self.C_STATE.get(charge_state))
+            
+        if self.state == self.B_STATE.CHARHING:
+            if voltage != self.temp:                
+                self.temp = round(voltage,5)
+                #rospy.loginfo("Time to charge:"+str(datetime.timedelta(minutes= round(self.predict_time(self.voltage.get_mean()),2))))
+                
+                t = round( (rospy.Time.now() - self.start_charge).to_sec(), 5)
+                v = self.temp
+                self.time_volt.append((t, self.temp ))
+            
+            
+#     def predict_time(self, voltage):
+#         # 4.2v @ 18 min
+#         # 3.7v @ 1min
+#         # = .0v = 17 min
+#         return 17 - ((voltage - self.vmin) / (self.vmax-self.vmin) * 17.)
+#              
 
 
 class Driver:
@@ -118,7 +218,12 @@ class Driver:
         self.options = options        
         
         self.crazyflie = Crazyflie()
+        self.battery_monitor = BatteryMonitor()
         cflib.crtp.init_drivers()
+                
+        
+        #self.csvwriter = csv.writer(open('baro.csv', 'wb'), delimiter=',',quotechar='"', quoting=csv.QUOTE_MINIMAL)
+        #self.baro_start_time = None
                  
         # Some shortcuts
         self.HZ100 = 10
@@ -151,7 +256,7 @@ class Driver:
         # Subscribers           
         self.sub_tf    = tf.TransformListener()         
         self.sub_joy   = rospy.Subscriber("/cfjoy", joyMSG, self.new_joydata)
-        
+        self.sub_magCalib   = rospy.Subscriber("/magCalib", magCalibMSG, self.new_magCalib)
         
         # Keep track of link quality to send out with battery status
         self.link = 0
@@ -178,7 +283,8 @@ class Driver:
         self.hover_monitor = False 
         
         # CF params we wanna change
-        self.cf_params = {"hover.baro_alpha":-1, 
+        self.cf_params = {"hover.aslAlpha":-1, 
+                           "hover.aslAlphaLong":-1,
                            "hover.kp":-1, 
                            "hover.ki":-1, 
                            "hover.kd":-1, 
@@ -188,13 +294,40 @@ class Driver:
                            "hover.zAccAlphaLong":-1,
                            "hover.zAccAlphaShort":-1,
                            "hover.maxAslErr":-1,
-                           "hover.hoverPidAlpha": -1}
+                           "hover.hoverPidAlpha": -1,
+                           "hover.zSpeedKp":-1,
+                           "hover.pid_mag":-1,
+                           "hover.voltageAlpha":-1,
+                           "magCalib.off_x": 0,
+                           "magCalib.off_y": 0,
+                           "magCalib.off_z": 0,
+                           "magCalib.scale_x": 0,
+                           "magCalib.scale_y": 0,
+                           "magCalib.scale_z": 0,
+                           "magCalib.thrust_x": 0,
+                           "magCalib.thrust_y": 0,
+                           "magCalib.thrust_z": 0,                           
+                           }
         
         # Dynserver                
         self.dynserver = DynamicReconfigureServer(driverCFG, self.reconfigure)
             
         self.connect(self.options)
         
+    def new_magCalib(self, msg):
+        new_settings = {}        
+        new_settings["magOffsetX"] = msg.offset[0]
+        new_settings["magOffsetY"] = msg.offset[1]
+        new_settings["magOffsetZ"] = msg.offset[2]
+        new_settings["magThrustX"] = msg.thrust_comp[0]
+        new_settings["magThrustY"] = msg.thrust_comp[1]
+        new_settings["magThrustZ"] = msg.thrust_comp[2]
+        new_settings["magScaleX"] = msg.scale[0]
+        new_settings["magScaleY"] = msg.scale[1]
+        new_settings["magScaleZ"] = msg.scale[2]        
+        self.dynserver.update_configuration(new_settings)  
+        rospy.loginfo("Updated magnetometer calibration data") 
+    
     def connect(self, options):     
         """Look for crazyflie every 2s and connect to the specified one if found"""                          
         rospy.loginfo("Waiting for crazyflie...")
@@ -317,50 +450,114 @@ class Driver:
             
         # SET CRAZYFLIE PARAMS
         # Could be done nicer, eg looping through key,value pairs and renaming the cfg variables
-        if self.cf_params["hover.baro_alpha"] != config["pressure_smooth"]:
-             self.cf_params["hover.baro_alpha"] = config["pressure_smooth"]
-             self.send_param("hover.baro_alpha", config["pressure_smooth"])
-        
+        if self.cf_params["hover.aslAlpha"] != config["aslAlpha"]:
+             self.cf_params["hover.aslAlpha"] = config["aslAlpha"]
+             self.send_param("hover.aslAlpha", config["aslAlpha"])
+             
+        if self.cf_params["hover.aslAlphaLong"] != config["aslAlphaLong"]:
+             self.cf_params["hover.aslAlphaLong"] = config["aslAlphaLong"]
+             self.send_param("hover.aslAlphaLong", config["aslAlphaLong"])       
         
         if self.cf_params["hover.kp"] != config["p"]:
              self.cf_params["hover.kp"] = config["p"]
              self.send_param("hover.kp", config["p"]) 
+             rospy.sleep(0.1)
        
         if self.cf_params["hover.ki"] != config["i"]:
              self.cf_params["hover.ki"] = config["i"]
-             self.send_param("hover.ki", config["i"]) 
+             self.send_param("hover.ki", config["i"])
+             rospy.sleep(0.1) 
        
         if self.cf_params["hover.kd"] != config["d"]:
              self.cf_params["hover.kd"] = config["d"]
-             self.send_param("hover.kd", config["d"]) 
+             self.send_param("hover.kd", config["d"])
+             rospy.sleep(0.1) 
              
         if self.cf_params["hover.zReduce"] != config["zReduce"]:
              self.cf_params["hover.zReduce"] = config["zReduce"]
-             self.send_param("hover.zReduce", config["zReduce"])              
+             self.send_param("hover.zReduce", config["zReduce"])
+             rospy.sleep(0.1)              
                            
         if self.cf_params["hover.minThrust"] != config["minThrust"]:
              self.cf_params["hover.minThrust"] = config["minThrust"]
              self.send_param("hover.minThrust", config["minThrust"])
+             rospy.sleep(0.1)
         
         if self.cf_params["hover.maxThrust"] != config["maxThrust"]:
              self.cf_params["hover.maxThrust"] = config["maxThrust"]
              self.send_param("hover.maxThrust", config["maxThrust"])
+             rospy.sleep(0.1)
                 
         if self.cf_params["hover.zAccAlphaShort"] != config["zAccShort"]:
              self.cf_params["hover.zAccAlphaShort"] = config["zAccShort"]
-             self.send_param("hover.zAccAlphaShort", config["zAccShort"]) 
+             self.send_param("hover.zAccAlphaShort", config["zAccShort"])
+             rospy.sleep(0.1) 
              
         if self.cf_params["hover.zAccAlphaLong"] != config["zAccLong"]:
              self.cf_params["hover.zAccAlphaLong"] = config["zAccLong"]
-             self.send_param("hover.zAccAlphaLong", config["zAccLong"]) 
+             self.send_param("hover.zAccAlphaLong", config["zAccLong"])
+             rospy.sleep(0.1) 
              
         if self.cf_params["hover.maxAslErr"] != config["maxAslErr"]:
              self.cf_params["hover.maxAslErr"] = config["maxAslErr"]
-             self.send_param("hover.maxAslErr", config["maxAslErr"])              
+             self.send_param("hover.maxAslErr", config["maxAslErr"])
+             rospy.sleep(0.1)              
         
         if self.cf_params["hover.hoverPidAlpha"] != config["hoverPidAlpha"]:
              self.cf_params["hover.hoverPidAlpha"] = config["hoverPidAlpha"]
-             self.send_param("hover.hoverPidAlpha", config["hoverPidAlpha"])                  
+             self.send_param("hover.hoverPidAlpha", config["hoverPidAlpha"])
+             rospy.sleep(0.1)        
+        if self.cf_params["hover.zSpeedKp"] != config["zSpeedKp"]:
+             self.cf_params["hover.zSpeedKp"] = config["zSpeedKp"]
+             self.send_param("hover.zSpeedKp", config["zSpeedKp"])
+             rospy.sleep(0.1)              
+        if self.cf_params["hover.pid_mag"] != config["pid_mag"]:
+             self.cf_params["hover.pid_mag"] = config["pid_mag"]
+             self.send_param("hover.pid_mag", config["pid_mag"])
+             rospy.sleep(0.1)        
+        if self.cf_params["hover.voltageAlpha"] != config["voltageAlpha"]:
+             self.cf_params["hover.voltageAlpha"] = config["voltageAlpha"]
+             self.send_param("hover.voltageAlpha", config["voltageAlpha"])
+             rospy.sleep(0.1)     
+             
+        if self.cf_params["magCalib.off_x"] != config["magOffsetX"]:
+             self.cf_params["magCalib.off_x"] = config["magOffsetX"]
+             self.send_param("magCalib.off_x", config["magOffsetX"])
+             rospy.sleep(0.1)  
+        if self.cf_params["magCalib.off_y"] != config["magOffsetY"]:
+             self.cf_params["magCalib.off_y"] = config["magOffsetY"]
+             self.send_param("magCalib.off_y", config["magOffsetY"])
+             rospy.sleep(0.1)               
+        if self.cf_params["magCalib.off_z"] != config["magOffsetZ"]:
+             self.cf_params["magCalib.off_z"] = config["magOffsetZ"]
+             self.send_param("magCalib.off_z", config["magOffsetZ"])
+             rospy.sleep(0.1)              
+             
+             
+        if self.cf_params["magCalib.scale_x"] != config["magScaleX"]:
+             self.cf_params["magCalib.scale_x"] = config["magScaleX"]
+             self.send_param("magCalib.scale_x", config["magScaleX"])
+             rospy.sleep(0.1)  
+        if self.cf_params["magCalib.scale_y"] != config["magScaleY"]:
+             self.cf_params["magCalib.scale_y"] = config["magScaleY"]
+             self.send_param("magCalib.scale_y", config["magScaleY"])
+             rospy.sleep(0.1)               
+        if self.cf_params["magCalib.scale_z"] != config["magScaleZ"]:
+             self.cf_params["magCalib.scale_z"] = config["magScaleZ"]
+             self.send_param("magCalib.scale_z", config["magScaleZ"])
+             rospy.sleep(0.1)    
+        if self.cf_params["magCalib.thrust_x"] != config["magThrustX"]:
+             self.cf_params["magCalib.thrust_x"] = config["magThrustX"]
+             self.send_param("magCalib.thrust_x", config["magThrustX"])
+             rospy.sleep(0.1)  
+        if self.cf_params["magCalib.thrust_y"] != config["magThrustY"]:
+             self.cf_params["magCalib.thrust_y"] = config["magThrustY"]
+             self.send_param("magCalib.thrust_y", config["magThrustY"])
+             rospy.sleep(0.1)               
+        if self.cf_params["magCalib.thrust_z"] != config["magThrustZ"]:
+             self.cf_params["magCalib.thrust_z"] = config["magThrustZ"]
+             self.send_param("magCalib.thrust_z", config["magThrustZ"])
+             rospy.sleep(0.1)                                          
         return config
     
     def send_param(self, key, value):
@@ -379,6 +576,7 @@ class Driver:
         roll, pitch, yawrate, thrust, hover, set_hover, hover_change = cmd    
         if self.crazyflie.state == CFState.CONNECTED:    
             self.crazyflie.commander.send_setpoint(roll, pitch, yawrate, thrust, hover, set_hover, hover_change)
+                
         
         
     def setup_log(self):
@@ -475,7 +673,11 @@ class Driver:
         logconf = LogConfig("LoggingMag", self.HZ100) #ms          
         logconf.addVariable(LogVariable("mag.x", "float"))        
         logconf.addVariable(LogVariable("mag.y", "float"))
-        logconf.addVariable(LogVariable("mag.z", "float"))        
+        logconf.addVariable(LogVariable("mag.z", "float")) 
+        logconf.addVariable(LogVariable("mag.x_raw", "float"))
+        logconf.addVariable(LogVariable("mag.y_raw", "float"))
+        logconf.addVariable(LogVariable("mag.z_raw", "float"))
+               
         self.logMag = self.crazyflie.log.create_log_packet(logconf)  
         if (self.logMag is not None):
             self.logMag.dataReceived.add_callback(self.logCallbackMag)
@@ -494,7 +696,9 @@ class Driver:
         logconf.addVariable(LogVariable("baro.asl_raw", "float"))
         logconf.addVariable(LogVariable("baro.asl", "float"))
         logconf.addVariable(LogVariable("baro.temp", "float"))
-        logconf.addVariable(LogVariable("baro.pressure", "float"))              
+        logconf.addVariable(LogVariable("baro.pressure", "float"))
+        logconf.addVariable(LogVariable("baro.asl_long", "float"))
+        logconf.addVariable(LogVariable("baro.asl_vspeed", "float"))                    
         self.logBaro = self.crazyflie.log.create_log_packet(logconf)  
         if (self.logBaro is not None):
             self.logBaro.dataReceived.add_callback(self.logCallbackBaro)
@@ -533,6 +737,7 @@ class Driver:
         logconf.addVariable(LogVariable("motor.m3", "uint32_t"))
         logconf.addVariable(LogVariable("motor.m4", "uint32_t"))  
         logconf.addVariable(LogVariable("motor.thrust", "uint16_t"))  
+        logconf.addVariable(LogVariable("motor.vLong", "float")) #TODO move
         self.logMotor = self.crazyflie.log.create_log_packet(logconf)  
         if (self.logMotor is not None):
             self.logMotor.dataReceived.add_callback(self.logCallbackMotor)
@@ -571,13 +776,22 @@ class Driver:
         msg.header.stamp = rospy.Time.now()
         msg.mag[0] = data["mag.x"]
         msg.mag[1] = data["mag.y"]
-        msg.mag[2] = data["mag.z"]      
+        msg.mag[2] = data["mag.z"]     
+        msg.magRaw[0] = data["mag.x_raw"]
+        msg.magRaw[1] = data["mag.y_raw"]
+        msg.magRaw[2] = data["mag.z_raw"] 
         self.pub_mag.publish(msg)       
         
-        self.pub_tf.sendTransform(msg.mag/np.linalg.norm(msg.mag),(0,0,0,1),
-             rospy.Time.now(), 
-             "/mag",
-             "/cf_q")
+        if np.linalg.norm(msg.magRaw)>1:
+            self.pub_tf.sendTransform(msg.mag/np.linalg.norm(msg.magRaw),(0,0,0,1),
+                 rospy.Time.now(), 
+                 "/mag_raw",
+                 "/cf_q")
+        if np.linalg.norm(msg.mag)>1:
+            self.pub_tf.sendTransform(msg.mag/np.linalg.norm(msg.mag),(0,0,0,1),
+                 rospy.Time.now(), 
+                 "/mag_calib",
+                 "/cf_q")            
                 
     def logCallbackGyro(self, data):    
         """Gyro axis data in deg/s -> rad/s"""       
@@ -627,8 +841,14 @@ class Driver:
         msg.pressure = data["baro.pressure"]
         msg.asl = data["baro.asl"]
         msg.asl_raw = data["baro.asl_raw"]
-        self.pub_baro.publish(msg)     
-             
+        msg.asl_long = data["baro.asl_long"]
+        msg.asl_vspeed = data["baro.asl_vspeed"]
+        self.pub_baro.publish(msg)           
+        
+        #if self.baro_start_time == None:
+        #    self.baro_start_time = rospy.Time.now() 
+        #self.csvwriter.writerow([(msg.header.stamp-self.baro_start_time).to_sec(),msg.asl, msg.asl_raw,msg.temperature,msg.pressure])
+      
                 
     def logCallbackBat(self, data):
         msg = batMSG()
@@ -637,8 +857,9 @@ class Driver:
         msg.bat_v = data["pm.vbat"]
         msg.bat_p = (data["pm.vbat"]-3.0)/1.15*100.
         msg.charge_state = data["pm.state_charge"]
-        msg.state = data["pm.state"]
+        msg.state = data["pm.state"]        
         self.pub_bat.publish(msg)
+        self.battery_monitor.update(msg.state, msg.charge_state, msg.bat_v)
 
         
     def logCallbackMotor(self, data):
@@ -648,8 +869,9 @@ class Driver:
         msg.pwm[1] = thrustToPercentage(data["motor.m2"])
         msg.pwm[2] = thrustToPercentage(data["motor.m3"])
         msg.pwm[3] = thrustToPercentage(data["motor.m4"])
-        msg.thrust = thrustToPercentage(data["motor.thrust"])
+        msg.thrust = thrustToPercentage(data["motor.thrust"])/100.
         msg.thrust_raw = data["motor.thrust"]
+        msg.vLong = data["motor.vLong"]
         self.pub_motor.publish(msg)                                                  
         
         
@@ -666,6 +888,7 @@ class Driver:
         rospy.loginfo("Connecting to: %s...", msg)
         
     def disconnectedCB(self, msg=None):
+        self.battery_monitor.done()
         if msg!=None:
             rospy.loginfo("Disconnected from: %s", msg)
         

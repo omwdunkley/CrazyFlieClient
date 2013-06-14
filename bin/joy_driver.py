@@ -214,6 +214,7 @@ class JoyController:
         msg.hover = hover
         msg.hover_set = hover_set
         msg.hover_change = z
+        msg.calib = self.pressed(Button.Triangle)
         self.pub_cfJoy.publish(msg)       
         
         
