@@ -306,7 +306,7 @@ class Driver:
                            "magCalib.scale_z": 0,
                            "magCalib.thrust_x": 0,
                            "magCalib.thrust_y": 0,
-                           "magCalib.thrust_z": 0,                           
+                           "magCalib.thrust_z": 0                         
                            }
         
         # Dynserver                
@@ -315,6 +315,7 @@ class Driver:
         self.connect(self.options)
         
     def new_magCalib(self, msg):
+        return
         new_settings = {}        
         new_settings["magOffsetX"] = msg.offset[0]
         new_settings["magOffsetY"] = msg.offset[1]
@@ -531,9 +532,9 @@ class Driver:
         if self.cf_params["magCalib.off_z"] != config["magOffsetZ"]:
              self.cf_params["magCalib.off_z"] = config["magOffsetZ"]
              self.send_param("magCalib.off_z", config["magOffsetZ"])
-             rospy.sleep(0.1)              
-             
-             
+             rospy.sleep(0.1)             
+              
+              
         if self.cf_params["magCalib.scale_x"] != config["magScaleX"]:
              self.cf_params["magCalib.scale_x"] = config["magScaleX"]
              self.send_param("magCalib.scale_x", config["magScaleX"])
@@ -557,7 +558,8 @@ class Driver:
         if self.cf_params["magCalib.thrust_z"] != config["magThrustZ"]:
              self.cf_params["magCalib.thrust_z"] = config["magThrustZ"]
              self.send_param("magCalib.thrust_z", config["magThrustZ"])
-             rospy.sleep(0.1)                                          
+             rospy.sleep(0.1) 
+                                                      
         return config
     
     def send_param(self, key, value):
