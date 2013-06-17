@@ -1,0 +1,24 @@
+{
+  "logconfig": {
+    "logblock": {
+      "max": 180, 
+      "variables": [
+        {
+          "stored_as": "float", 
+          "type": "TOC", 
+          "name": "ollie.yaw", 
+          "fetch_as": "float"
+        }, 
+        {
+          "stored_as": "float", 
+          "type": "TOC", 
+          "name": "ollie.yaw_compass", 
+          "fetch_as": "float"
+        }
+      ], 
+      "min": -180, 
+      "name": "", 
+      "period": 50
+    }
+  }
+}
