@@ -1,10 +1,7 @@
 Header header
-float32 asl_target
-float32 pid
-float32 p
-float32 i
-float32 d
 float32 err
 float32 zSpeed
-float32 zAccLong
-float32 zAccShort
+float32 acc_vspeed
+float32 asl_vspeed
+float32 zBias
+float32 target

@@ -30,6 +30,7 @@ from crazyflie_ros.msg import attitude as attitudeMSG
 from crazyflie_ros.msg import hover as hoverMSG
 from crazyflie_ros.msg import CFJoy as joyMSG
 from crazyflie_ros.msg import mag_calib as magCalibMSG
+from crazyflie_ros.msg import zpid as zpidMSG
  
 import cflib.crtp
 from cflib.crazyflie import Crazyflie
@@ -40,6 +41,31 @@ from cfclient.utils.logconfigreader import LogVariable, LogConfig
 
 
 MAX_THRUST = 65365.0
+
+class zSpeed:
+    def __init__(self):
+        self.speed = 0.0
+        self.bias = 0.0
+        self.pub_speed   = rospy.Publisher("/cf/speed", accMSG)
+        self.bias_alpha = 0.99
+        
+    def add(self, sample):
+        self.speed += sample * 0.01
+        self.bias = self.bias * self.bias_alpha + self.speed * (1.0-self.bias_alpha) 
+        
+        msg = accMSG()
+        msg.header.stamp = rospy.Time.now()
+        msg.acc[0] = self.speed
+        #msg.acc[1] = data["acc.y"]
+        #msg.acc[2] = data["acc.z"]
+        msg.acc_w[0] = self.bias
+        msg.acc_w[1] = self.speed  - self.bias
+        #msg.acc_w[2] = data["acc.zw"]        
+        self.pub_speed.publish(msg)
+        
+    def reconfigure(self, config):
+        #self.bias_alpha = config["zbias"]
+        return config
 
 class ChargeState:
     def __init__(self):
@@ -220,6 +246,8 @@ class Driver:
         self.crazyflie = Crazyflie()
         self.battery_monitor = BatteryMonitor()
         cflib.crtp.init_drivers()
+        
+        self.zspeed = zSpeed()
                 
         
         #self.csvwriter = csv.writer(open('baro.csv', 'wb'), delimiter=',',quotechar='"', quoting=csv.QUOTE_MINIMAL)
@@ -251,6 +279,7 @@ class Driver:
         self.pub_hover = rospy.Publisher("/cf/hover", hoverMSG)
         self.pub_attitude = rospy.Publisher("/cf/attitude", attitudeMSG)
         self.pub_bat   = rospy.Publisher("/cf/bat", batMSG)
+        self.pub_zpid   = rospy.Publisher("/cf/zpid", zpidMSG)
         self.pub_tf    = tf.TransformBroadcaster()            
         
         # Subscribers           
@@ -269,7 +298,8 @@ class Driver:
         self.logAttitude = None
         self.logAcc = None
         self.logBat = None
-        self.logHover = None             
+        self.logHover = None
+        self.logZPid = None                   
         self.logGravOffset = None #only here till it works
         
         # keep tracks if loggers are running
@@ -280,58 +310,38 @@ class Driver:
         self.bat_monitor = False
         self.motor_monitor = False    
         self.attitude_monitor = False   
-        self.hover_monitor = False 
+        self.hover_monitor = False
+        self.zpid_monitor = False 
         
-        # CF params we wanna change
-        self.cf_params = {"hover.aslAlpha":-1, 
-                           "hover.aslAlphaLong":-1,
-                           "hover.kp":-1, 
-                           "hover.ki":-1, 
-                           "hover.kd":-1, 
-                           "hover.zReduce":-1,
-                           "hover.minThrust":-1,
-                           "hover.maxThrust":-1,
-                           "hover.zAccAlphaLong":-1,
-                           "hover.zAccAlphaShort":-1,
-                           "hover.maxAslErr":-1,
-                           "hover.hoverPidAlpha": -1,
-                           "hover.zSpeedKp":-1,
-                           "hover.pid_mag":-1,
-                           "hover.voltageAlpha":-1,
-                           "magCalib.off_x": 0,
-                           "magCalib.off_y": 0,
-                           "magCalib.off_z": 0,
-                           "magCalib.scale_x": 0,
-                           "magCalib.scale_y": 0,
-                           "magCalib.scale_z": 0,
-                           "magCalib.thrust_x": 0,
-                           "magCalib.thrust_y": 0,
-                           "magCalib.thrust_z": 0,
-                           "sensorfusion6.magImu":0                         
-                           }
+        # CF params we wanna be able to change
+        self.cf_param_groups = ["hover", "sensorfusion6", "magCalib"]
+        self.cf_params_cache = {}
+       
         
         # Dynserver                
         self.dynserver = DynamicReconfigureServer(driverCFG, self.reconfigure)
-            
+        
+        # Finished set up. Connect to flie            
         self.connect(self.options)
         
-    def new_magCalib(self, msg):
-        return
-        new_settings = {}        
-        new_settings["magOffsetX"] = msg.offset[0]
-        new_settings["magOffsetY"] = msg.offset[1]
-        new_settings["magOffsetZ"] = msg.offset[2]
-        new_settings["magThrustX"] = msg.thrust_comp[0]
-        new_settings["magThrustY"] = msg.thrust_comp[1]
-        new_settings["magThrustZ"] = msg.thrust_comp[2]
-        new_settings["magScaleX"] = msg.scale[0]
-        new_settings["magScaleY"] = msg.scale[1]
-        new_settings["magScaleZ"] = msg.scale[2]        
+    def new_magCalib(self, msg):  
+        """ Receive magnetometer calibration results. Send to flie via dyn conf"""      
+        new_settings = {}
+        #TODO        
+        new_settings["magCalib_off_x"] = msg.offset[0]
+        new_settings["magCalib_off_y"] = msg.offset[1]
+        new_settings["magCalib_off_z"] = msg.offset[2]
+        new_settings["magCalib_thrust_x"] = msg.thrust_comp[0]
+        new_settings["magCalib_thrust_y"] = msg.thrust_comp[1]
+        new_settings["magCalib_thrust_z"] = msg.thrust_comp[2]
+        new_settings["magCalib_scale_x"] = msg.scale[0]
+        new_settings["magCalib_scale_y"] = msg.scale[1]
+        new_settings["magCalib_scale_z"] = msg.scale[2]        
         self.dynserver.update_configuration(new_settings)  
         rospy.loginfo("Updated magnetometer calibration data") 
     
     def connect(self, options):     
-        """Look for crazyflie every 2s and connect to the specified one if found"""                          
+        """ Look for crazyflie every 2s and connect to the specified one if found"""                          
         rospy.loginfo("Waiting for crazyflie...")
         while not rospy.is_shutdown():
             interfaces = cflib.crtp.scan_interfaces()
@@ -350,7 +360,7 @@ class Driver:
  
  
     def new_joydata(self, joymsg):
-        """Joydata arrived. Should happen at 100hz."""
+        """ Joydata arrived. Should happen at 100hz."""
         
         # Parse joydata and extract commands
         roll = joymsg.roll
@@ -367,8 +377,22 @@ class Driver:
 
     def reconfigure(self, config, level):
         """ Fill in local variables with values received from dynamic reconfigure clients (typically the GUI)."""
+        config = self.zspeed.reconfigure(config)
+        
+
 
         # On / off logging
+        if self.zpid_monitor != config["read_zpid"]:
+            self.zpid_monitor = config["read_zpid"]           
+            if self.logZPid != None:
+                if self.zpid_monitor:               
+                    self.logZPid.start()
+                    rospy.loginfo("zPID Logging started")
+                else:   
+                    self.logZPid.stop()
+                    rospy.loginfo("zPID Logging stopped")
+
+        
         if self.gyro_monitor != config["read_gyro"]:
             self.gyro_monitor = config["read_gyro"]           
             if self.logGyro != None:
@@ -450,122 +474,34 @@ class Driver:
                     rospy.loginfo("Motor Logging stopped")                                                                                                                        
 
             
-        # SET CRAZYFLIE PARAMS
-        # Could be done nicer, eg looping through key,value pairs and renaming the cfg variables
-        if self.cf_params["hover.aslAlpha"] != config["aslAlpha"]:
-             self.cf_params["hover.aslAlpha"] = config["aslAlpha"]
-             self.send_param("hover.aslAlpha", config["aslAlpha"])
-             
-        if self.cf_params["hover.aslAlphaLong"] != config["aslAlphaLong"]:
-             self.cf_params["hover.aslAlphaLong"] = config["aslAlphaLong"]
-             self.send_param("hover.aslAlphaLong", config["aslAlphaLong"])       
+        # SET CRAZYFLIE PARAMS        
         
-        if self.cf_params["hover.kp"] != config["p"]:
-             self.cf_params["hover.kp"] = config["p"]
-             self.send_param("hover.kp", config["p"]) 
-             rospy.sleep(0.1)
-       
-        if self.cf_params["hover.ki"] != config["i"]:
-             self.cf_params["hover.ki"] = config["i"]
-             self.send_param("hover.ki", config["i"])
-             rospy.sleep(0.1) 
-       
-        if self.cf_params["hover.kd"] != config["d"]:
-             self.cf_params["hover.kd"] = config["d"]
-             self.send_param("hover.kd", config["d"])
-             rospy.sleep(0.1) 
-             
-        if self.cf_params["hover.zReduce"] != config["zReduce"]:
-             self.cf_params["hover.zReduce"] = config["zReduce"]
-             self.send_param("hover.zReduce", config["zReduce"])
-             rospy.sleep(0.1)              
-                           
-        if self.cf_params["hover.minThrust"] != config["minThrust"]:
-             self.cf_params["hover.minThrust"] = config["minThrust"]
-             self.send_param("hover.minThrust", config["minThrust"])
-             rospy.sleep(0.1)
-        
-        if self.cf_params["hover.maxThrust"] != config["maxThrust"]:
-             self.cf_params["hover.maxThrust"] = config["maxThrust"]
-             self.send_param("hover.maxThrust", config["maxThrust"])
-             rospy.sleep(0.1)
-                
-        if self.cf_params["hover.zAccAlphaShort"] != config["zAccShort"]:
-             self.cf_params["hover.zAccAlphaShort"] = config["zAccShort"]
-             self.send_param("hover.zAccAlphaShort", config["zAccShort"])
-             rospy.sleep(0.1) 
-             
-        if self.cf_params["hover.zAccAlphaLong"] != config["zAccLong"]:
-             self.cf_params["hover.zAccAlphaLong"] = config["zAccLong"]
-             self.send_param("hover.zAccAlphaLong", config["zAccLong"])
-             rospy.sleep(0.1) 
-             
-        if self.cf_params["hover.maxAslErr"] != config["maxAslErr"]:
-             self.cf_params["hover.maxAslErr"] = config["maxAslErr"]
-             self.send_param("hover.maxAslErr", config["maxAslErr"])
-             rospy.sleep(0.1)              
-        
-        if self.cf_params["hover.hoverPidAlpha"] != config["hoverPidAlpha"]:
-             self.cf_params["hover.hoverPidAlpha"] = config["hoverPidAlpha"]
-             self.send_param("hover.hoverPidAlpha", config["hoverPidAlpha"])
-             rospy.sleep(0.1)        
-        if self.cf_params["hover.zSpeedKp"] != config["zSpeedKp"]:
-             self.cf_params["hover.zSpeedKp"] = config["zSpeedKp"]
-             self.send_param("hover.zSpeedKp", config["zSpeedKp"])
-             rospy.sleep(0.1)              
-        if self.cf_params["hover.pid_mag"] != config["pid_mag"]:
-             self.cf_params["hover.pid_mag"] = config["pid_mag"]
-             self.send_param("hover.pid_mag", config["pid_mag"])
-             rospy.sleep(0.1)        
-        if self.cf_params["hover.voltageAlpha"] != config["voltageAlpha"]:
-             self.cf_params["hover.voltageAlpha"] = config["voltageAlpha"]
-             self.send_param("hover.voltageAlpha", config["voltageAlpha"])
-             rospy.sleep(0.1)  
-             
-        if self.cf_params["sensorfusion6.magImu"] != config["magImu"]:
-             self.cf_params["sensorfusion6.magImu"] = config["magImu"]
-             self.send_param("sensorfusion6.magImu", int(config["magImu"]))
-             rospy.sleep(0.1)              
-             
-                
-             
-        if self.cf_params["magCalib.off_x"] != config["magOffsetX"]:
-             self.cf_params["magCalib.off_x"] = config["magOffsetX"]
-             self.send_param("magCalib.off_x", config["magOffsetX"])
-             rospy.sleep(0.1)  
-        if self.cf_params["magCalib.off_y"] != config["magOffsetY"]:
-             self.cf_params["magCalib.off_y"] = config["magOffsetY"]
-             self.send_param("magCalib.off_y", config["magOffsetY"])
-             rospy.sleep(0.1)               
-        if self.cf_params["magCalib.off_z"] != config["magOffsetZ"]:
-             self.cf_params["magCalib.off_z"] = config["magOffsetZ"]
-             self.send_param("magCalib.off_z", config["magOffsetZ"])
-             rospy.sleep(0.1)                  
-        if self.cf_params["magCalib.scale_x"] != config["magScaleX"]:
-             self.cf_params["magCalib.scale_x"] = config["magScaleX"]
-             self.send_param("magCalib.scale_x", config["magScaleX"])
-             rospy.sleep(0.1)  
-        if self.cf_params["magCalib.scale_y"] != config["magScaleY"]:
-             self.cf_params["magCalib.scale_y"] = config["magScaleY"]
-             self.send_param("magCalib.scale_y", config["magScaleY"])
-             rospy.sleep(0.1)               
-        if self.cf_params["magCalib.scale_z"] != config["magScaleZ"]:
-             self.cf_params["magCalib.scale_z"] = config["magScaleZ"]
-             self.send_param("magCalib.scale_z", config["magScaleZ"])
-             rospy.sleep(0.1)    
-        if self.cf_params["magCalib.thrust_x"] != config["magThrustX"]:
-             self.cf_params["magCalib.thrust_x"] = config["magThrustX"]
-             self.send_param("magCalib.thrust_x", config["magThrustX"])
-             rospy.sleep(0.1)  
-        if self.cf_params["magCalib.thrust_y"] != config["magThrustY"]:
-             self.cf_params["magCalib.thrust_y"] = config["magThrustY"]
-             self.send_param("magCalib.thrust_y", config["magThrustY"])
-             rospy.sleep(0.1)               
-        if self.cf_params["magCalib.thrust_z"] != config["magThrustZ"]:
-             self.cf_params["magCalib.thrust_z"] = config["magThrustZ"]
-             self.send_param("magCalib.thrust_z", config["magThrustZ"])
-             rospy.sleep(0.1) 
-                                                      
+        for key, value in config.iteritems():
+            # Skip this key (whats its purpose??)            
+            if key == "groups":
+                continue
+                    
+            # Continue if variable exists and is correct
+            if self.cf_params_cache.has_key(key):
+                if config[key] == self.cf_params_cache[key]:
+                    # Nothing changed
+                    continue
+            
+            # Doesnt exist or has changed
+            
+            # Split into group and name
+            s = key.split("_",1)
+            
+            # Make sure it is a group name pair
+            if len(s) == 2:
+                # make sure group is valid
+                if s[0] in self.cf_param_groups:
+                    # update cache, send variable to flie
+                    self.cf_params_cache[key] = value                    
+                    self.send_param(s[0]+"."+s[1], value)    
+                    print "updated: ",s[0]+"."+s[1],"->",value   
+                    rospy.sleep(0.1)
+                                                    
         return config
     
     def send_param(self, key, value):
@@ -610,6 +546,26 @@ class Driver:
         else:
             rospy.logwarn("Could not setup Attitude logging!")   
             
+            
+            
+            
+        rospy.sleep(0.25)
+        
+        """ ZPID LOGGING @ 100hz """
+        logconf = LogConfig("zpid", self.HZ100) #ms
+        logconf.addVariable(LogVariable("zpid.p", "float"))
+        logconf.addVariable(LogVariable("zpid.i", "float"))   
+        logconf.addVariable(LogVariable("zpid.d", "float"))   
+        logconf.addVariable(LogVariable("zpid.pid", "float"))              
+        self.logZPid = self.crazyflie.log.create_log_packet(logconf)  
+        if (self.logZPid is not None):
+            self.logZPid.dataReceived.add_callback(self.logCallbackZPid)
+            self.logZPid.error.add_callback(self.logErrorCB)
+            if self.zpid_monitor:
+                self.logZPid.start()
+                rospy.loginfo("ZPID Logging started")     
+        else:
+            rospy.logwarn("Could not setup ZPID logging!")               
         rospy.sleep(0.25)
         
         
@@ -618,12 +574,13 @@ class Driver:
         #logconf.addVariable(LogVariable("hover.p", "float"))
         #logconf.addVariable(LogVariable("hover.i", "float"))
         #logconf.addVariable(LogVariable("hover.d", "float"))
+        #logconf.addVariable(LogVariable("hover.pid", "float"))
         logconf.addVariable(LogVariable("hover.err", "float"))
-        logconf.addVariable(LogVariable("hover.target", "float"))
-        logconf.addVariable(LogVariable("hover.pid", "float"))
-        logconf.addVariable(LogVariable("hover.zSpeed", "float"))  
-        logconf.addVariable(LogVariable("hover.zAccShort", "float"))
-        logconf.addVariable(LogVariable("hover.zAccLong", "float"))
+        logconf.addVariable(LogVariable("hover.target", "float"))        
+        logconf.addVariable(LogVariable("hover.zSpeed", "float"))
+        logconf.addVariable(LogVariable("hover.zBias", "float"))    
+        logconf.addVariable(LogVariable("hover.acc_vspeed", "float"))
+        logconf.addVariable(LogVariable("hover.asl_vspeed", "float"))
         
        
         self.logHover = self.crazyflie.log.create_log_packet(logconf)  
@@ -701,12 +658,11 @@ class Driver:
         
         """ BAROMETER LOGGING @ 100hz """
         logconf = LogConfig("LoggingBaro", self.HZ100) #ms
-        logconf.addVariable(LogVariable("baro.asl_raw", "float"))
+        logconf.addVariable(LogVariable("baro.aslRaw", "float"))
         logconf.addVariable(LogVariable("baro.asl", "float"))
         logconf.addVariable(LogVariable("baro.temp", "float"))
         logconf.addVariable(LogVariable("baro.pressure", "float"))
-        logconf.addVariable(LogVariable("baro.asl_long", "float"))
-        logconf.addVariable(LogVariable("baro.asl_vspeed", "float"))                    
+        logconf.addVariable(LogVariable("baro.aslLong", "float"))                 
         self.logBaro = self.crazyflie.log.create_log_packet(logconf)  
         if (self.logBaro is not None):
             self.logBaro.dataReceived.add_callback(self.logCallbackBaro)
@@ -767,7 +723,10 @@ class Driver:
         msg.acc[2] = data["acc.z"]
         msg.acc_w[0] = data["acc.xw"]
         msg.acc_w[1] = data["acc.yw"]
-        msg.acc_w[2] = data["acc.zw"]        
+        msg.acc_w[2] = data["acc.zw"]      
+        
+        self.zspeed.add(msg.acc_w[2])  
+        
         self.pub_acc.publish(msg)
         
         self.pub_tf.sendTransform(msg.acc_w,(0,0,0,1),
@@ -811,20 +770,31 @@ class Driver:
         self.pub_gyro.publish(msg)
         
     def logCallbackHover(self, data): 
-        """Output data regarding hovering""" 
+        """Output data regarding hovering"""         
         msg = hoverMSG()   
         msg.header.stamp = rospy.Time.now()
+        
         msg.err = data["hover.err"]
-        msg.pid = data["hover.pid"]
-        #msg.p = data["hover.p"]
-        #msg.i = data["hover.i"]
-        #msg.d = data["hover.d"]
         msg.zSpeed = data["hover.zSpeed"]
-        msg.zAccLong = data["hover.zAccLong"]
-        msg.zAccShort = data["hover.zAccShort"]
-        msg.asl_target = data["hover.target"]
+        msg.acc_vspeed = data["hover.acc_vspeed"]
+        msg.asl_vspeed = data["hover.asl_vspeed"]
+        msg.target = data["hover.target"]
+        msg.zBias = data["hover.zBias"]
+        print msg
+        
         self.pub_hover.publish(msg)        
 
+
+    def logCallbackZPid(self, data):
+        msg = zpidMSG()   
+        msg.header.stamp = rospy.Time.now()
+        msg.p = data["zpid.p"]
+        msg.i = data["zpid.i"]
+        msg.d = data["zpid.d"]
+        msg.pid = data["zpid.pid"]
+        
+        self.pub_zpid.publish(msg) 
+          
     def logCallbackAttitude(self, data):
         msg = attitudeMSG()   
         msg.header.stamp = rospy.Time.now()
@@ -845,12 +815,11 @@ class Driver:
     def logCallbackBaro(self, data):
         msg = baroMSG()
         msg.header.stamp = rospy.Time.now()
-        msg.temperature = data["baro.temp"]
+        msg.temp = data["baro.temp"]
         msg.pressure = data["baro.pressure"]
         msg.asl = data["baro.asl"]
-        msg.asl_raw = data["baro.asl_raw"]
-        msg.asl_long = data["baro.asl_long"]
-        msg.asl_vspeed = data["baro.asl_vspeed"]
+        msg.aslRaw = data["baro.aslRaw"]
+        msg.aslLong = data["baro.aslLong"]
         self.pub_baro.publish(msg)           
         
         #if self.baro_start_time == None:
