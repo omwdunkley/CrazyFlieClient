@@ -783,8 +783,8 @@ class Driver:
         
         msg.err = deadband(data["hover.err"], self.deadband)
         msg.zSpeed = data["hover.zSpeed"]
-        msg.acc_vspeed = data["hover.acc_vspeed"] * self.cf_params_cache["hover_acc_vspeedFac"]
-        msg.asl_vspeed = data["hover.asl_vspeed"] * self.cf_params_cache["hover_asl_vspeedFac"]
+        msg.acc_vspeed = data["hover.acc_vspeed"]# * self.cf_params_cache["hover_acc_vspeedFac"]
+        msg.asl_vspeed = data["hover.asl_vspeed"]# * self.cf_params_cache["hover_asl_vspeedFac"]
         msg.target = data["hover.target"]
         msg.zBias = data["hover.zBias"]
      
