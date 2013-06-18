@@ -776,12 +776,11 @@ class Driver:
         
         msg.err = data["hover.err"]
         msg.zSpeed = data["hover.zSpeed"]
-        msg.acc_vspeed = data["hover.acc_vspeed"]
-        msg.asl_vspeed = data["hover.asl_vspeed"]
+        msg.acc_vspeed = data["hover.acc_vspeed"] * self.cf_params_cache["hover_acc_vspeedFac"]
+        msg.asl_vspeed = data["hover.asl_vspeed"] * self.cf_params_cache["hover_asl_vspeedFac"]
         msg.target = data["hover.target"]
         msg.zBias = data["hover.zBias"]
-        print msg
-        
+     
         self.pub_hover.publish(msg)        
 
 
