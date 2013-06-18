@@ -42,6 +42,16 @@ from cfclient.utils.logconfigreader import LogVariable, LogConfig
 
 MAX_THRUST = 65365.0
 
+
+def deadband(val, dead):
+    if abs(val)<dead:
+        val = 0.
+    elif val>0:
+        val-=dead
+    elif val<0:
+        val+=dead
+    return val
+
 class zSpeed:
     def __init__(self):
         self.speed = 0.0
@@ -317,6 +327,7 @@ class Driver:
         self.cf_param_groups = ["hover", "sensorfusion6", "magCalib"]
         self.cf_params_cache = {}
        
+       
         
         # Dynserver                
         self.dynserver = DynamicReconfigureServer(driverCFG, self.reconfigure)
@@ -379,7 +390,7 @@ class Driver:
         """ Fill in local variables with values received from dynamic reconfigure clients (typically the GUI)."""
         config = self.zspeed.reconfigure(config)
         
-
+        self.deadband = config["deadband"]
 
         # On / off logging
         if self.zpid_monitor != config["read_zpid"]:
@@ -571,10 +582,6 @@ class Driver:
         
         """ HOVER LOGGING @ 100hz """
         logconf = LogConfig("hover", self.HZ100) #ms
-        #logconf.addVariable(LogVariable("hover.p", "float"))
-        #logconf.addVariable(LogVariable("hover.i", "float"))
-        #logconf.addVariable(LogVariable("hover.d", "float"))
-        #logconf.addVariable(LogVariable("hover.pid", "float"))
         logconf.addVariable(LogVariable("hover.err", "float"))
         logconf.addVariable(LogVariable("hover.target", "float"))        
         logconf.addVariable(LogVariable("hover.zSpeed", "float"))
@@ -774,7 +781,7 @@ class Driver:
         msg = hoverMSG()   
         msg.header.stamp = rospy.Time.now()
         
-        msg.err = data["hover.err"]
+        msg.err = deadband(data["hover.err"], self.deadband)
         msg.zSpeed = data["hover.zSpeed"]
         msg.acc_vspeed = data["hover.acc_vspeed"] * self.cf_params_cache["hover_acc_vspeedFac"]
         msg.asl_vspeed = data["hover.asl_vspeed"] * self.cf_params_cache["hover_asl_vspeedFac"]
