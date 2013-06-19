@@ -542,7 +542,7 @@ class Driver:
         rospy.sleep(0.25)
         
         """ ATTITUDE LOGGING @ 100hz """
-        logconf = LogConfig("attitude", self.HZ100) #ms
+        logconf = LogConfig("attitude", 50) #ms
         logconf.addVariable(LogVariable("attitude.q0", "float"))
         logconf.addVariable(LogVariable("attitude.q1", "float"))
         logconf.addVariable(LogVariable("attitude.q2", "float"))
