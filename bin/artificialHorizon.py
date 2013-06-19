@@ -75,44 +75,52 @@ if __name__=="__main__":
 
         def initUI(self):
 
-            vbox = QtGui.QVBoxLayout()
-
-            sld = QtGui.QSlider(QtCore.Qt.Horizontal, self)
-            sld.setFocusPolicy(QtCore.Qt.NoFocus)
-            sld.setRange(0, 3600)
-            sld.setValue(1800)
+            # 
             
-            vbox.addWidget(sld)
-
             self.wid = AttitudeIndicator()
-
-            sld.valueChanged[int].connect(self.updateRoll)
-            vbox.addWidget(self.wid)
-
             hbox = QtGui.QHBoxLayout()
-            hbox.addLayout(vbox)
+            hbox.addWidget(self.wid)
+
+            # old code with sliders
+
+#             vbox = QtGui.QVBoxLayout()
+# 
+#             sld = QtGui.QSlider(QtCore.Qt.Horizontal, self)
+#             sld.setFocusPolicy(QtCore.Qt.NoFocus)
+#             sld.setRange(0, 3600)
+#             sld.setValue(1800)
+#             
+#             vbox.addWidget(sld)
+# 
+#             self.wid = AttitudeIndicator()
+# 
+#             sld.valueChanged[int].connect(self.updateRoll)
+#             vbox.addWidget(self.wid)
+# 
+#             hbox = QtGui.QHBoxLayout()
+#             hbox.addLayout(vbox)
+#             
+#             sldPitch = QtGui.QSlider(QtCore.Qt.Vertical, self)
+#             sldPitch.setFocusPolicy(QtCore.Qt.NoFocus)
+#             sldPitch.setRange(0, 180)
+#             sldPitch.setValue(90)
+#             
+#             sldPitch.valueChanged[int].connect(self.updatePitch)
+#             
+#             hbox.addWidget(sldPitch)
+#             hboxYaw = QtGui.QHBoxLayout()
+#             
+#             sldYaw = QtGui.QSlider(QtCore.Qt.Horizontal, self)
+#             sldYaw.setFocusPolicy(QtCore.Qt.NoFocus)
+#             sldYaw.setRange(0, 2*3600)
+#             sldYaw.setValue(3600)
+#             
+#             sldYaw.valueChanged[int].connect(self.updateYaw)
+#             
+#             hboxYaw.addWidget(sldYaw)
+#             vbox.addLayout(hboxYaw)
             
-            sldPitch = QtGui.QSlider(QtCore.Qt.Vertical, self)
-            sldPitch.setFocusPolicy(QtCore.Qt.NoFocus)
-            sldPitch.setRange(0, 180)
-            sldPitch.setValue(90)
-            
-            sldPitch.valueChanged[int].connect(self.updatePitch)
-            
-            hbox.addWidget(sldPitch)
-            
-            ##
-            hboxYaw = QtGui.QHBoxLayout()
-            
-            sldYaw = QtGui.QSlider(QtCore.Qt.Horizontal, self)
-            sldYaw.setFocusPolicy(QtCore.Qt.NoFocus)
-            sldYaw.setRange(0, 2*3600)
-            sldYaw.setValue(3600)
-            
-            sldYaw.valueChanged[int].connect(self.updateYaw)
-            
-            hboxYaw.addWidget(sldYaw)
-            vbox.addLayout(hboxYaw)
+            ####
             
             self.setLayout(hbox)
 
