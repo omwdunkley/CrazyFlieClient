@@ -23,6 +23,8 @@ if __name__=="__main__":
         pitchSignal = pyqtSignal(float)
         yawSignal   = pyqtSignal(float)
 
+        useMag = False
+
         def __init__(self):
             super(ArtificialHorizon, self).__init__()
 
@@ -38,10 +40,12 @@ if __name__=="__main__":
             
         def readMag(self, data):
             if data.mag[0] == 0 and data.mag[1] == 0 and data.mag[2] == 0:
+                self.useMag = False
                 return
             
+            self.useMag = True
             r2d = 180.0 / 3.1415926535
-            angle = math.atan2(data.mag[1], data.mag[0]) * r2d
+            angle = atan2(data.mag[0], data.mag[1]) * r2d
             #self.updateYaw(angle * 180.0 / 3.1415926535)
             self.yawSignal.emit(angle)
 
@@ -57,12 +61,14 @@ if __name__=="__main__":
             roll = angles[0] * r2d + 180
             self.rollSignal.emit(roll)
             self.pitchSignal.emit(-angles[1] * r2d)
-            yaw = angles[2] * r2d
-            if yaw > 180:
-                yaw = yaw - 360
-            elif yaw < -180:
-                yaw = yaw + 360
-            self.yawSignal.emit(yaw)
+            
+            if self.useMag == False:
+                yaw = angles[2] * r2d
+                if yaw > 180:
+                    yaw = yaw - 360
+                elif yaw < -180:
+                    yaw = yaw + 360
+                self.yawSignal.emit(yaw)
 
         def updatePitch(self, pitch):
             self.wid.setPitch(pitch, True)
