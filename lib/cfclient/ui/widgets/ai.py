@@ -42,23 +42,38 @@ class AttitudeIndicator(QtGui.QWidget):
         
         self.roll = 0
         self.pitch = 0
+        self.yaw = 0
 
         self.setMinimumSize(30, 30)
         #self.setMaximumSize(240,240)
         
+    def setYaw(self, yaw, repaint=True):
+        self.yaw = yaw
+        if repaint:
+            self.repaint()
 
-    def setRoll(self, roll):
+    def setRoll(self, roll, repaint=True):
         self.roll = roll
-        self.repaint()
+        if repaint:
+            self.repaint()
 
-    def setPitch(self, pitch):
+    def setPitch(self, pitch, repaint=True):
         self.pitch = pitch
-        self.repaint()
+        if repaint:
+            self.repaint()
     
-    def setRollPitch(self, roll, pitch):
+    def setRollPitch(self, roll, pitch, repaint=True):
         self.roll = roll
         self.pitch = pitch
-        self.repaint()
+        if repaint:
+            self.repaint()
+
+    def setRollPitchYaw(self, roll, pitch, yaw, repaint=True):
+        self.roll = roll
+        self.pitch = pitch
+        self.yaw = yaw
+        if repaint:
+            self.repaint()
 
     def paintEvent(self, e):
         qp = QtGui.QPainter()
@@ -77,9 +92,6 @@ class AttitudeIndicator(QtGui.QWidget):
         qp.translate(-w/2,-h/2)
         qp.setRenderHint(qp.Antialiasing)
 
-        font = QtGui.QFont('Serif', 7, QtGui.QFont.Light)
-        qp.setFont(font)
-
         #Draw the blue
         qp.setPen(QtGui.QColor(0, 61, 144))
         qp.setBrush(QtGui.QColor(0, 61, 144))
@@ -90,10 +102,23 @@ class AttitudeIndicator(QtGui.QWidget):
         qp.setBrush(QtGui.QColor(59, 41, 39))
         qp.drawRect(-w, h/2, 3*w, 3*h)
 
-        pen = QtGui.QPen(QtGui.QColor(255, 255, 255), 1.5,
+        pen = QtGui.QPen(QtGui.QColor(255, 255, 255), 1,
             QtCore.Qt.SolidLine)
         qp.setPen(pen)
         qp.drawLine(-w, h/2, 3*w, h/2)
+        
+        labels = ["S", "|", "SE", "|", "E", "|", "NE", "|", "N", "|", "NW", "|", "W", "|", "SW", "|", "S"]
+
+        font = QtGui.QFont('Serif', 16, QtGui.QFont.Light)
+        qp.setFont(font)
+                
+        for i, j in enumerate(range(-360, 360, 45)):
+            angle = j / 2 + self.yaw
+            label = labels[i]
+            qp.drawText(w/2 + w * angle / 180 - 5 * len(label), h/2 + 8, label)
+        
+        font = QtGui.QFont('Serif', 7, QtGui.QFont.Light)
+        qp.setFont(font)
         
         #Drawing pitch lines
         for ofset in [-180, 0, 180]:
@@ -118,8 +143,9 @@ class AttitudeIndicator(QtGui.QWidget):
         
         qp.setWorldMatrixEnabled(False)
         
-        pen = QtGui.QPen(QtGui.QColor(0, 0, 0), 2,
-            QtCore.Qt.SolidLine)
+        pen = QtGui.QPen(QtGui.QColor(0, 0, 0), 1,
+            QtCore.Qt.DashLine)
+        
         qp.setBrush(QtGui.QColor(0, 0, 0))
         qp.setPen(pen)
         qp.drawLine(0, h/2, w, h/2)
@@ -138,6 +164,9 @@ if __name__=="__main__":
 
         def updateRoll(self, roll):
             self.wid.setRoll((roll/10.0)-180.0)
+            
+        def updateYaw(self, yaw):
+            self.wid.setYaw((yaw/10.0) - 360.0)
 
         def initUI(self):
 
@@ -166,6 +195,19 @@ if __name__=="__main__":
             sldPitch.valueChanged[int].connect(self.updatePitch)
             
             hbox.addWidget(sldPitch)
+            
+            ##
+            hboxYaw = QtGui.QHBoxLayout()
+            
+            sldYaw = QtGui.QSlider(QtCore.Qt.Horizontal, self)
+            sldYaw.setFocusPolicy(QtCore.Qt.NoFocus)
+            sldYaw.setRange(0, 2*3600)
+            sldYaw.setValue(3600)
+            
+            sldYaw.valueChanged[int].connect(self.updateYaw)
+            
+            hboxYaw.addWidget(sldYaw)
+            vbox.addLayout(hboxYaw)
             
             self.setLayout(hbox)
 
