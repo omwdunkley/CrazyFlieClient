@@ -107,13 +107,13 @@ class AttitudeIndicator(QtGui.QWidget):
         qp.setPen(pen)
         qp.drawLine(-w, h/2, 3*w, h/2)
         
-        labels = ["W", "|", "SW", "|", "S", "|", "SE", "|", "E", "|", "NE", "|", "N", "|", "NW", "|", "W", "|", "SW", "|", "S", "|", "SE", "|", "E"]
+        labels = ["E", "|", "SE", "|", "S", "|", "SW", "|", "W", "|", "NW", "|", "N", "|", "NE", "|", "E", "|", "SE", "|", "S", "|", "SW", "|", "W"]
 
         font = QtGui.QFont('Serif', 16, QtGui.QFont.Light)
         qp.setFont(font)
                 
         for i, j in enumerate(range(-540, 585, 45)):
-            angle = j / 2 + self.yaw
+            angle = j / 2 - self.yaw
             label = labels[i]
             qp.drawText(w/2 + w * angle / 180 - 5 * len(label), h/2 + 8, label)
         
