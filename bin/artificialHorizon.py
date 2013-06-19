@@ -5,7 +5,8 @@ import rospy
 import roslib
 from math import atan2, degrees, radians
 
-from PyQt4.QtCore import QObject, pyqtSignal
+from PyQt4.QtCore import QObject, pyqtSignal, QTimer
+from PyQt4.QtGui import QApplication
 
 roslib.load_manifest("crazyflie_ros")
 import tf
@@ -15,6 +16,7 @@ from crazyflie_ros.msg import mag as magMSG
 from crazyflie_ros.msg import attitude as attitudeMSG
 
 from cfclient.ui.widgets.ai import AttitudeIndicator
+import signal
 
 
 class ArtificialHorizon(QtGui.QWidget):
@@ -48,6 +50,7 @@ class ArtificialHorizon(QtGui.QWidget):
         self.yawSignal.emit(angle)
 
     def readAttitude(self, data):
+    
         x,y,z,w = data.q
         angles = tf.transformations.euler_from_quaternion((w,x,y,z))
         
@@ -64,7 +67,8 @@ class ArtificialHorizon(QtGui.QWidget):
             self.rollPitchYawSignal.emit(roll, pitch, yaw)
         else:
             self.rollPitchSignal.emit(roll, pitch)
-           
+
+       
 
     def initUI(self):
         self.wid = AttitudeIndicator()
@@ -76,11 +80,20 @@ class ArtificialHorizon(QtGui.QWidget):
         self.show()
 
 
-
+def sigint_handler(*args):
+    #sys.exit()
+    QApplication.quit()
+    
 def main():
-
-    app = QtGui.QApplication(sys.argv)
+    signal.signal(signal.SIGINT, sigint_handler)    
+    app = QtGui.QApplication(sys.argv)    
     ex = ArtificialHorizon()
+    
+    # Keep checking for sigkill
+    timer = QTimer()
+    timer.start(100) 
+    timer.timeout.connect(lambda: None)  
+      
     sys.exit(app.exec_())
 
 
