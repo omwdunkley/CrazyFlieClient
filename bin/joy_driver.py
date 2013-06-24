@@ -34,7 +34,8 @@ def enum(*sequential, **named):
 
 Button = enum(L1=10,R1=11,Select=0,Start=3,L2=8,R2=9,Up=4,Right=5,Down=6,Left=7,Square=15,Cross=14,Triangle=12,Circle=13)
 Axes = enum(SLL=0,SLU=1,SRL=2,SRU=3,Up=4,Right=5,Down=6,Left=7,L2=8,R2=9,L1=10,R1=11,Triangle=12,Circle=13,Cross=14,Square=15,AccL=16,AccF=17,AccU=18,GyroY=19)
-
+#Button = enum(L1=10,R1=11,Select=0,Start=3,L2=8,R2=9,Up=4,Right=5,Down=6,Left=7,Square=15,Cross=14,Triangle=12,Circle=13)
+#Axes = enum(SLL=0,SLU=1,SRL=2,SRU=3,Up=4,Right=5,Down=6,Left=7,L2=4+8,R2=4+9,L1=4+10,R1=4+11,Triangle=4+12,Circle=4+13,Cross=4+14,Square=4+15,AccL=16,AccF=17,AccU=18,GyroY=19)
 
 
 MAX_THRUST = 65365.0
@@ -131,15 +132,31 @@ class JoyController:
         return raw_thrust        
     
     def new_joydata(self, joymsg):
+        global Button
+        global Axes
         #Should run at 100hz. Use launch files roslaunch crazyflie_row joy.launch
         if self.prev_cmd == None:
             self.prev_cmd = joymsg
+            print len(joymsg.axes)
+            
+            #USB mode
+            if len(joymsg.axes) == 27:
+                Button = enum(L1=10,R1=11,Select=0,Start=3,L2=8,R2=9,Up=4,Right=5,Down=6,Left=7,Square=15,Cross=14,Triangle=12,Circle=13)
+                Axes = enum(SLL=0,SLU=1,SRL=2,SRU=3,Up=4,Right=5,Down=6,Left=7,L2=4+8,R2=4+9,L1=4+10,R1=4+11,Triangle=4+12,Circle=4+13,Cross=4+14,Square=4+15,AccL=16,AccF=17,AccU=18,GyroY=19)
+           
             return (0,0,0,0,False,False,0)
         
         self.curr_cmd = joymsg
         hover = False
         
         
+#        print "AXES"
+#        for i,x in enumerate(joymsg.axes):
+#            print " ",i,":",x
+#        print "BUTTONS
+#        for i,x in enumerate(joymsg.buttons):
+#            print " ",i,":",x
+            
         x = 0
         y = 0
         z = 0
