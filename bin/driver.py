@@ -258,6 +258,9 @@ class Driver:
         cflib.crtp.init_drivers()
         
         self.zspeed = zSpeed()
+        
+        # Keep track of this to know if the user changed imu mode to/from imu6/9
+        self.preMagcalib = None
                 
         
         #self.csvwriter = csv.writer(open('baro.csv', 'wb'), delimiter=',',quotechar='"', quoting=csv.QUOTE_MINIMAL)
@@ -496,7 +499,8 @@ class Driver:
             if self.cf_params_cache.has_key(key):
                 if config[key] == self.cf_params_cache[key]:
                     # Nothing changed
-                    continue
+                    if not key.startswith("magCalib") or ( self.preMagcalib and not config["sensorfusion6_magImu"]):
+                        continue
             
             # Doesnt exist or has changed
             
@@ -512,7 +516,9 @@ class Driver:
                     self.send_param(s[0]+"."+s[1], value)    
                     print "updated: ",s[0]+"."+s[1],"->",value   
                     rospy.sleep(0.1)
-                                                    
+                
+
+        self.preMagcalib = config["sensorfusion6_magImu"]                                   
         return config
     
     def send_param(self, key, value):
