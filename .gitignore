@@ -43,6 +43,7 @@ nosetests.xml
 
 ### CMake ###
 CMakeCache.txt
+CMakeLists.txt.user
 CMakeFiles
 cmake_install.cmake
 install_manifest.txt

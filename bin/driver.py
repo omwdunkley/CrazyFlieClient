@@ -499,7 +499,7 @@ class Driver:
             if self.cf_params_cache.has_key(key):
                 if config[key] == self.cf_params_cache[key]:
                     # Nothing changed
-                    if not key.startswith("magCalib") or ( self.preMagcalib and not config["sensorfusion6_magImu"]):
+                    if not key.startswith("magCalib") or ( self.preMagcalib or not config["sensorfusion6_magImu"]):
                         continue
             
             # Doesnt exist or has changed
